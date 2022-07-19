@@ -70,6 +70,12 @@
     <Content Include="Common\initShaders.js" />
     <Content Include="Common\MV.js" />
     <Content Include="Common\webgl-utils.js" />
+    <Content Include="LoadObjNoTexture.js" />
+    <Content Include="Objs\battledrone.js" />
+    <Content Include="Objs\duck.js" />
+    <Content Include="Objs\Polyhedron.js" />
+    <Content Include="Objs\teapot.js" />
+    <Content Include="Objs\tree.js" />
     <Content Include="ShadowMap.html" />
     <Content Include="ShadowMap.js" />
     <Content Include="Web.config" />

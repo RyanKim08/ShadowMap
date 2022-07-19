@@ -73,6 +73,38 @@ var specularProduct, specularProductLoc;
 
 var lightingLoc;
 
+var OFFSCREEN_WIDTH = 2048, OFFSCREEN_HEIGHT = 2048;
+
+var shadowProgram;
+
+var shadowVBuffer;
+var shadowVPosition;
+var shadowTexture;
+var shadowTextureLoc;
+
+var framebuffer, depthBuffer;
+
+var pmvMatrixFromLightLoc1, pmvMatrixFromLightLoc2;
+var pmvMatrixFromLight1, pmvMatrixFromLight2;
+
+var modelViewStack = [];
+
+var sphereScale = 0.3;
+var polyhedronScale = 1.2;
+var battledroneScale = 1.8;
+var duckScale = 0.8;
+var teapotScale = 0.8;
+var treeScale = 1.2;
+
+var theta = [0, 0, 0];
+var rotateObject = true;
+
+var axis = 1;
+var xAxis = 0;
+var yAxis = 1;
+var zAxis = 2;
+
+var objYOff = 0.0;
 
 window.onload = function init() {
     canvas = document.getElementById("gl-canvas");
@@ -81,7 +113,7 @@ window.onload = function init() {
     if (!gl) { alert("WebGL isn't available"); }
 
     gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0.0, 0.0, 0.0, 1.0);
+    gl.clearColor(0.0, 0.0, 1.0, 1.0);
 
     gl.enable(gl.DEPTH_TEST);
 
@@ -93,7 +125,23 @@ window.onload = function init() {
     createPlane();
     createSphereMap();
 
-    program = initShaders(gl, "vertex-shader", "fragment-shader");
+    objScale = sphereScale;
+
+    setFBOs();
+    shadowProgram = initShaders(gl, "vertex-shader1", "fragment-shader1");
+    program = initShaders(gl, "vertex-shader2", "fragment-shader2");
+
+    gl.useProgram(shadowProgram);
+
+    shadowVBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, shadowVBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, flatten(pointsArray), gl.STATIC_DRAW);
+    shadowVPosition = gl.getAttribLocation(shadowProgram, "vPosition");
+    gl.vertexAttribPointer(shadowVPosition, 4, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(shadowVPosition);
+
+    pmvMatrixFromLightLoc1 = gl.getUniformLocation(shadowProgram, "pmvMatrixFromLight");
+
     gl.useProgram(program);
 
     // Create vertex buffer and vPosition attribute
@@ -137,7 +185,129 @@ window.onload = function init() {
     gl.uniform4fv(diffuseProductLoc, flatten(diffuseProduct));
     gl.uniform4fv(specularProductLoc, flatten(specularProduct));
 
+    pmvMatrixFromLightLoc2 = gl.getUniformLocation(program, "pmvMatrixFromLight");
+    shadowTextureLoc = gl.getUniformLocation(program, "shadowTexture");
+
+    document.getElementById("rotateX").onclick =
+        function () {
+            axis = xAxis;
+        };
+
+    document.getElementById("rotateY").onclick =
+        function () {
+            axis = yAxis;
+        };
+
+    document.getElementById("rotateZ").onclick =
+        function () {
+            axis = zAxis;
+        };
+
+    document.getElementById("toggleRotation").onclick =
+        function () {
+            rotateObject = !rotateObject;
+        };
+
+
+    document.getElementById("oYPos").oninput =
+        function (event) {
+            objYOff = Number(event.target.value);
+        };
+
+
+    document.getElementById("selObject").onchange =
+        function (event) {
+            var objSelected = event.target.value;
+            var objData = "";
+
+            initPoints();
+            createPlane();
+
+            if (objSelected == "0") {
+                createSphereMap();
+                updateBuffers();
+                objScale = sphereScale;
+            }
+            else {
+                axis = 1;
+                theta[0] = theta[1] = theta[2] = 0;
+                if (objSelected == "1") {
+                    objData = filedata1;
+                    objScale = polyhedronScale;
+                }
+                else if (objSelected == "2") {
+                    objData = filedata2;
+                    objScale = battledroneScale;
+                }
+                else if (objSelected == "3") {
+                    objData = filedata3;
+                    objScale = duckScale;
+                }
+                else if (objSelected == "4") {
+                    objData = filedata6;
+                    objScale = teapotScale;
+                }
+                else if (objSelected == "5") {
+                    objData = filedata7;
+                    objScale = treeScale;
+                }
+                loadobj(objData);
+                updateBuffers();
+            }
+        };
+
     render();
+}
+
+// Sets up the Frame Buffer Objects
+function setFBOs() {
+    shadowTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, shadowTexture);
+
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA,
+        OFFSCREEN_WIDTH, OFFSCREEN_HEIGHT,
+        0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    // Allocate a frame buffer object
+    framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+
+    // Attach color buffer
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D, shadowTexture, 0);
+
+    // create a depth renderbuffer
+    depthBuffer = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
+
+    // make a depth buffer and the same size as the targetTexture
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16,
+        OFFSCREEN_WIDTH, OFFSCREEN_HEIGHT);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,
+        gl.RENDERBUFFER, depthBuffer);
+
+    // check for completeness
+    var status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status != gl.FRAMEBUFFER_COMPLETE)
+        alert('Framebuffer Not Complete');
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, shadowTexture);
+}
+
+function updateBuffers() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, flatten(pointsArray), gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, nBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, flatten(normalsArray), gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, shadowVBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, flatten(pointsArray), gl.STATIC_DRAW);
 }
 
 function initPoints() {
@@ -226,29 +396,127 @@ function createSphereMap() {
 }
 
 function render() {
+    ////////////////// Part 1 ////////////////////
+    // This First Part goes to the Shadow Buffer //
+    ///////////////////////////////////////////////
+
+    gl.useProgram(shadowProgram);
+
+    // send data to framebuffer for off-screen render
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+
+    gl.disableVertexAttribArray(vPosition);
+    gl.disableVertexAttribArray(vNormal);
+
+    gl.enableVertexAttribArray(shadowVPosition);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, shadowVBuffer);
+    gl.vertexAttribPointer(shadowVPosition, 4, gl.FLOAT, false, 0, 0);
+
+    gl.viewport(0, 0, OFFSCREEN_WIDTH, OFFSCREEN_HEIGHT);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+
+    ///////////// Set Light Position As Eye ///////////////
+
+    eye = vec3(lightPosition);
+
+
+    ///////////// Render the Plane ///////////////
+
+    modelViewMatrix = translate(planeTrans);
+    modelViewMatrix = mult(modelViewMatrix, scalem(planeScale, planeScale, planeScale));
+
+    pmvMatrixFromLight1 = mult(projectionMatrix, lookAt(eye, at, up));
+    pmvMatrixFromLight1 = mult(pmvMatrixFromLight1, modelViewMatrix);
+    gl.uniformMatrix4fv(pmvMatrixFromLightLoc1, false, flatten(pmvMatrixFromLight1));
+
+    gl.drawArrays(gl.TRIANGLES, 0, planeVertCnt);
+
+
+    ///////////// Render the Object ///////////////
+
+    if (rotateObject)
+        theta[axis] += 2.0;
+
+    modelViewMatrix = translate(objX, objYMid + objYOff, objZ);
+    modelViewMatrix = mult(modelViewMatrix, rotateX(theta[xAxis]));
+    modelViewMatrix = mult(modelViewMatrix, rotateY(theta[yAxis]));
+    modelViewMatrix = mult(modelViewMatrix, rotateZ(theta[zAxis]));
+    modelViewMatrix = mult(modelViewMatrix, scalem(objScale, objScale, objScale));
+
+    pmvMatrixFromLight2 = mult(projectionMatrix, lookAt(eye, at, up));
+    pmvMatrixFromLight2 = mult(pmvMatrixFromLight2, modelViewMatrix);
+    gl.uniformMatrix4fv(pmvMatrixFromLightLoc1, false, flatten(pmvMatrixFromLight2));
+
+    gl.drawArrays(gl.TRIANGLES, planeVertCnt, pointsArray.length - planeVertCnt);
+
+    ///////////////// Part 2 /////////////////
+    // This Second Part goes to the Screen  //
+    //////////////////////////////////////////
+
+    gl.useProgram(program);
+
+    // send data to GPU for normal render
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    gl.disableVertexAttribArray(shadowVPosition);
+
+    gl.enableVertexAttribArray(vPosition);
+    gl.enableVertexAttribArray(vNormal);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
+    gl.vertexAttribPointer(vPosition, 4, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, nBuffer);
+    gl.vertexAttribPointer(vNormal, 3, gl.FLOAT, false, 0, 0);
+
+
+    ///////////// Set Camera Position As Eye ///////////////
 
     eye = cameraPosition;
 
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
     modelViewMatrix = lookAt(eye, at, up);
+
+
+    //////////// Render the Plane /////////////
+
+    modelViewStack.push(modelViewMatrix);
 
     modelViewMatrix = mult(modelViewMatrix, translate(planeTrans));
     modelViewMatrix = mult(modelViewMatrix, scalem(planeScale, planeScale, planeScale));
 
     gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(modelViewMatrix));
 
-    // Render the Plane //
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, shadowTexture);
+    gl.uniform1i(shadowTextureLoc, 0);
+
+    gl.uniformMatrix4fv(pmvMatrixFromLightLoc2, false, flatten(pmvMatrixFromLight1));
+
     gl.drawArrays(gl.TRIANGLES, 0, planeVertCnt);
 
+    //////////// Render the Object /////////////
 
-    modelViewMatrix = translate(objX, objYMid, objZ);
+    modelViewMatrix = modelViewStack.pop();
+
+    modelViewMatrix = mult(modelViewMatrix, translate(objX, objYMid + objYOff, objZ));
+    modelViewMatrix = mult(modelViewMatrix, rotateX(theta[xAxis]));
+    modelViewMatrix = mult(modelViewMatrix, rotateY(theta[yAxis]));
+    modelViewMatrix = mult(modelViewMatrix, rotateZ(theta[zAxis]));
     modelViewMatrix = mult(modelViewMatrix, scalem(objScale, objScale, objScale));
-
     gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(modelViewMatrix));
 
-    // Render the Object //
-    gl.drawArrays(gl.TRIANGLES, planeVertCnt,
-        pointsArray.length - planeVertCnt);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, shadowTexture);
+    gl.uniform1i(shadowTextureLoc, 0);
+
+    gl.uniformMatrix4fv(pmvMatrixFromLightLoc2, false, flatten(pmvMatrixFromLight2));
+    gl.drawArrays(gl.TRIANGLES, planeVertCnt, pointsArray.length - planeVertCnt);
+
 
     requestAnimFrame(render);
 }
